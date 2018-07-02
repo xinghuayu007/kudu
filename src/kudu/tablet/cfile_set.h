@@ -26,6 +26,7 @@
 
 #include <boost/container/flat_map.hpp>
 #include <boost/container/vector.hpp>
+#include <gflags/gflags_declare.h>
 #include <glog/logging.h>
 #include <gtest/gtest_prod.h>
 
@@ -33,17 +34,26 @@
 #include "kudu/common/iterator.h"
 #include "kudu/common/rowid.h"
 #include "kudu/common/schema.h"
+#include "kudu/gutil/gscoped_ptr.h"
 #include "kudu/gutil/macros.h"
 #include "kudu/gutil/map-util.h"
 #include "kudu/gutil/port.h"
 #include "kudu/tablet/rowset_metadata.h"
-#include "kudu/util/make_shared.h"
 #include "kudu/util/memory/arena.h"
 #include "kudu/util/status.h"
+
+DECLARE_int32(max_encoded_key_size_bytes);
+
+namespace boost {
+template <class T>
+class optional;
+}  // namespace boost
 
 namespace kudu {
 
 class ColumnMaterializationContext;
+class EncodedKey;
+class KuduPartialRow;
 class MemTracker;
 class ScanSpec;
 class SelectionVector;
@@ -221,6 +231,7 @@ class CFileSet::Iterator : public ColumnwiseIterator {
   DISALLOW_COPY_AND_ASSIGN(Iterator);
   FRIEND_TEST(TestCFileSet, TestRangeScan);
   friend class CFileSet;
+  friend class IndexSkipScanTest;
 
   // 'projection' must remain valid for the lifetime of this object.
   Iterator(std::shared_ptr<CFileSet const> base_data,
@@ -232,7 +243,7 @@ class CFileSet::Iterator : public ColumnwiseIterator {
         cur_idx_(0),
         prepared_count_(0),
         io_context_(io_context),
-        arena_(256) {}
+        arena_(FLAGS_max_encoded_key_size_bytes) {}
 
   // Fill in col_iters_ for each of the requested columns.
   Status CreateColumnIterators(const ScanSpec* spec);
@@ -246,8 +257,126 @@ class CFileSet::Iterator : public ColumnwiseIterator {
 
   void Unprepare();
 
-  // Prepare the given column. The column must not have been prepared yet.
-  Status PrepareColumn(ColumnMaterializationContext *ctx);
+  //
+  // Index Skip Scan overview
+  //
+  //   In general, for a scan predicated on a subset of columns of a composite
+  //   (a.k.a. multi-column) primary key, it's not possible to use the B-tree
+  //   index to simply seek to the appropriate range of rows and then scan only
+  //   the necessary ones. The only exception is when a scan is predicated
+  //   on the first K columns of a composite N-column primary key, where K < N,
+  //   K >= 1. For all other cases, a simplistic approach mandates a full tablet
+  //   scan, materializing every row to evaluate the predicates on K columns.
+  //
+  //   However, it's possible to devise a synthetic approach that would avoid
+  //   scanning of all tablet's rows. The idea is to use the B-tree index to
+  //   seek to the start of distinctly prefixed row ranges, and for each
+  //   distinctly prefixed range perform scanning only within the sub-range
+  //   defined by the first predicate. So, the rest of predicates on the (K - 1)
+  //   columns are evaluated only for the latter sub-range.
+  //
+  //   This approach is dubbed "Index Skip Scan".
+  //
+  // Definitions
+  //
+  //   "predicate column"
+  //     Leftmost, non-leading primary key column with a predicate.
+  //
+  //   "predicate value"
+  //     Value that the "predicate column" is predicated on. Since only equality
+  //     predicates are supported, there is only a single value of interest.
+  //
+  //   "prefix column"
+  //     The collective columns to the left of the "predicate column".
+  //
+  //   "prefix key"
+  //     Any value in the "prefix column".
+  //
+  // Details
+  //
+  //   In order to keep track of the number of rows that satisfy the
+  //   "predicate value" wrt a distinct prefix key we first seek to the first
+  //   such row in the index column and this corresponding value is called
+  //   "lower bound" key. Next, we seek to the row that is right after the last
+  //   row that satisfies the "predicate value" wrt to the distinct prefix key,
+  //   and this corresponding value is called "upper bound" key.
+  //
+
+
+  // By the definition (see above), the skip scan optimization is possible
+  // if there exists an equality predicate on any subset of the composite
+  // primary key's columns not including the very first one.
+  void TryEnableSkipScan(const ScanSpec& spec);
+
+  // Decode the currently-seeked key into 'enc_key'.
+  Status DecodeCurrentKey(gscoped_ptr<EncodedKey>* enc_key);
+
+  // This function is used to place the validx_iter_ at the next greater prefix key.
+  Status SeekToNextPrefixKey(size_t num_prefix_cols, bool cache_seeked_value);
+
+  // Seek to the next row that matches the predicate and has the same prefix
+  // as that of `enc_key`.
+  Status SeekToRowWithCurPrefixMatchingPred(const gscoped_ptr<EncodedKey>& enc_key);
+
+  // Build the key with the same prefix as 'cur_enc_key', that has
+  // 'skip_scan_predicate_value_' in its predicate column,
+  // and the minimum possible value for all other columns.
+  Status BuildKeyWithPredicateVal(const gscoped_ptr<EncodedKey>& cur_enc_key,
+                                  KuduPartialRow* p_row,
+                                  gscoped_ptr<EncodedKey>* enc_key);
+
+  // Returns true if the given encoded key matches the skip scan predicate.
+  bool CheckPredicateMatch(const gscoped_ptr<EncodedKey>& enc_key) const;
+
+  // Check if the column values in the range corresponding to the given
+  // inclusive column id range [start_col_id, end_col_id] are equal between the
+  // two given keys.
+  bool KeyColumnsMatch(const gscoped_ptr<EncodedKey>& key1,
+                       const gscoped_ptr<EncodedKey>& key2,
+                       int start_col_id, int end_col_id) const;
+
+  // This method implements a "skip-scan" optimization, allowing a scan to use
+  // the primary key index to efficiently seek to matching rows where there are
+  // predicates on compound key columns that do not necessarily include the
+  // leading column of the primary key. At the time of writing, only a single
+  // equality predicate is supported, although the algorithm can support ranges
+  // of values.
+  //
+  // This method should be invoked during the PrepareBatch() phase of the row
+  // iterator lifecycle.
+  //
+  // This method assumes exclusive access to key_iter.
+  //
+  // The in-out parameter 'remaining' refers to the number of rows remaining to
+  // scan. When this method is invoked, 'remaining' should contain the maximum
+  // number of remaining rows available to scan. Once this method returns,
+  // 'remaining' will contain the number of rows to scan to consume the
+  // available matching rows according to the equality predicate. Note:
+  // 'remaining' will always be at least 1, although it is a TODO to allow it
+  // to be 0 (0 violates CHECK conditions elsewhere in the scan code).
+  //
+  // Currently, skip scan will be dynamically disabled when the number of seeks
+  // for distinct prefix keys exceeds sqrt(#total rows). We use sqrt(#total rows)
+  // as a cutoff because based on performance tests on upto 10M rows per tablet,
+  // the scan time for skip scan is the same as that of the current flow until
+  // #seeks = sqrt(#total_rows). Further increase in #seeks leads to a drop in
+  // skip scan performance wrt the current flow. This cutoff value is stored in
+  // 'skip_scan_num_seeks_cutoff_'.
+  //
+  // Preconditions upon entering this method:
+  //   * key_iter_ is not NULL
+  //
+  // Postconditions upon exiting this method:
+  //   * cur_idx_ is updated to the row_id of the next row(containing the next
+  //     higher distinct prefix) to scan
+  //   * 'remaining' stores the number the entries to be scanned in the current
+  //     scan range.
+  //
+  // See the .cc file for details on the approach and the implementation.
+  Status SkipToNextScan(size_t* remaining);
+
+  // Prepare the given column if not already prepared.
+  Status PrepareColumn(ColumnMaterializationContext* ctx);
 
   const std::shared_ptr<CFileSet const> base_data_;
   const Schema* projection_;
@@ -281,6 +410,32 @@ class CFileSet::Iterator : public ColumnwiseIterator {
   // stored in 'col_iters_'.
   std::vector<cfile::ColumnIterator*> prepared_iters_;
 
+  // Flag for whether index skip scan is used.
+  bool use_skip_scan_ = false;
+
+  // Store equality predicate value to use skip scan.
+  const void* skip_scan_predicate_value_;
+
+  // Column id of the "predicate_column".
+  int skip_scan_predicate_column_id_;
+
+  // Row id of the next row that does not match the predicate.
+  // This is an exclusive upper bound on our scan range.
+  // A value of -1 indicates that the upper bound is not known.
+  int64_t skip_scan_upper_bound_idx_ = -1;
+
+  // Store the number of seeks for distinct prefixes in
+  // index skip scan.
+  int64_t skip_scan_num_seeks_ = 0;
+
+  // Store the cutoff on the number of skip scan seeks before disabling skip scan.
+  int64_t skip_scan_num_seeks_cutoff_;
+
+  // Whether the skip scan optimization has searched the current prefix for a predicate match
+  // or whether the prefix has changed since its last check.
+  bool skip_scan_searched_cur_prefix_ = true;
+
+  // Buffer to store the pointer to encoded key during skip scan.
   Arena arena_;
 };
 

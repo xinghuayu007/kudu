@@ -24,6 +24,7 @@
 #include "kudu/util/faststring.h"
 #include "kudu/util/slice.h"
 #include "kudu/util/status.h"
+#include "kudu/gutil/gscoped_ptr.h"
 
 namespace kudu {
 
@@ -58,7 +59,12 @@ class EncodedKey {
   // EncodedKey. The returned key is allocated from the arena.
   static Status IncrementEncodedKey(const Schema& tablet_schema, EncodedKey** key, Arena* arena);
 
-  const Slice& encoded_key() const { return encoded_key_; }
+  // Increment the key formed by the first "num_columns" columns of the encoded key.
+  static Status IncrementEncodedKeyColumns(const Schema& tablet_schema,
+                                           int32_t num_columns, Arena* arena,
+                                           EncodedKey** key);
+
+  const Slice &encoded_key() const { return encoded_key_; }
 
   ArrayView<const void* const> raw_keys() const { return raw_keys_; }
 

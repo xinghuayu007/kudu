@@ -800,13 +800,44 @@ Status CFileIterator::SeekToFirst() {
   last_prepare_count_ = 0;
 
   prepared_blocks_.push_back(b.release());
-
+  if (PREDICT_TRUE(validx_iter_ != nullptr)) {
+    RETURN_NOT_OK(StoreCurrentValue());
+  }
   seeked_ = idx_iter;
   return Status::OK();
 }
 
-Status CFileIterator::SeekAtOrAfter(const EncodedKey &key,
-                                    bool *exact_match) {
+Status CFileIterator::StoreCurrentValue() {
+  if (PREDICT_FALSE(validx_iter_ == nullptr)) {
+    return Status::NotSupported("no value index in file");
+  }
+
+  if (prepared_blocks_.empty()) {
+    return Status::NotFound("blocks not found");
+  }
+
+  Slice ret;
+  RowBlockMemory rbm(8192);
+  ColumnBlock cb(reader_->type_info(), nullptr, &ret, /* nrows= */ 1, &rbm);
+  ColumnDataView cdv(&cb);
+
+  PreparedBlock* pblk = prepared_blocks_.back();
+  size_t n = 1;
+  RETURN_NOT_OK(pblk->dblk_->CopyNextValues(&n, &cdv));
+
+  Slice* out = reinterpret_cast<Slice*>(cdv.data());
+  cur_val_ = out->ToString();
+
+  return Status::OK();
+}
+
+const string& CFileIterator::GetCurrentValue() const {
+  return cur_val_;
+}
+
+Status CFileIterator::SeekAtOrAfter(const EncodedKey &encoded_key,
+                                    bool cache_seeked_value, bool *exact_match) {
+  bool local_exact_match;
   RETURN_NOT_OK(PrepareForNewSeek());
   DCHECK_EQ(reader_->is_nullable(), false);
 
@@ -814,7 +845,7 @@ Status CFileIterator::SeekAtOrAfter(const EncodedKey &key,
     return Status::NotSupported("no value index present");
   }
 
-  Status s = validx_iter_->SeekAtOrBefore(key.encoded_key());
+  Status s = validx_iter_->SeekAtOrBefore(encoded_key.encoded_key());
   if (PREDICT_FALSE(s.IsNotFound())) {
     // Seeking to a value before the first value in the file
     // will return NotFound, due to the way the index seek
@@ -830,12 +861,12 @@ Status CFileIterator::SeekAtOrAfter(const EncodedKey &key,
   RETURN_NOT_OK(ReadCurrentDataBlock(*validx_iter_, b.get()));
 
   Status dblk_seek_status;
-  if (key.num_key_columns() > 1) {
-    Slice slice = key.encoded_key();
-    dblk_seek_status = b->dblk_->SeekAtOrAfterValue(&slice, exact_match);
+  if (encoded_key.num_key_columns() > 1) {
+    Slice slice = encoded_key.encoded_key();
+    dblk_seek_status = b->dblk_->SeekAtOrAfterValue(&slice, &local_exact_match);
   } else {
-    dblk_seek_status = b->dblk_->SeekAtOrAfterValue(key.raw_keys()[0],
-                                                    exact_match);
+    dblk_seek_status = b->dblk_->SeekAtOrAfterValue(encoded_key.raw_keys()[0],
+                                                    &local_exact_match);
   }
 
   // If seeking within the data block results in NotFound, then that indicates that the
@@ -845,10 +876,10 @@ Status CFileIterator::SeekAtOrAfter(const EncodedKey &key,
   // last block in the file, then we just return NotFound(), since there is no
   // value "at or after".
   if (PREDICT_FALSE(dblk_seek_status.IsNotFound())) {
-    *exact_match = false;
+    local_exact_match = false;
     if (PREDICT_FALSE(!validx_iter_->HasNext())) {
       return Status::NotFound("key after last block in file",
-                              KUDU_REDACT(key.encoded_key().ToDebugString()));
+                              KUDU_REDACT(encoded_key.encoded_key().ToDebugString()));
     }
     RETURN_NOT_OK(validx_iter_->Next());
     RETURN_NOT_OK(ReadCurrentDataBlock(*validx_iter_, b.get()));
@@ -863,8 +894,11 @@ Status CFileIterator::SeekAtOrAfter(const EncodedKey &key,
   last_prepare_count_ = 0;
 
   prepared_blocks_.push_back(b.release());
-
+  if (PREDICT_TRUE(validx_iter_ != nullptr) && cache_seeked_value) {
+    RETURN_NOT_OK(StoreCurrentValue());
+  }
   seeked_ = validx_iter_.get();
+  if (exact_match) *exact_match = local_exact_match;
   return Status::OK();
 }
 
