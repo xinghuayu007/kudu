@@ -824,10 +824,8 @@ Status CFileIterator::StoreCurrentValue() {
   PreparedBlock* pblk = prepared_blocks_.back();
   size_t n = 1;
   RETURN_NOT_OK(pblk->dblk_->CopyNextValues(&n, &cdv));
-
   Slice* out = reinterpret_cast<Slice*>(cdv.data());
   cur_val_ = out->ToString();
-
   return Status::OK();
 }
 
@@ -1046,7 +1044,7 @@ Status CFileIterator::PrepareBatch(size_t *n) {
 
   rowid_t start_idx = last_prepare_idx_;
   rowid_t end_idx = start_idx + *n;
-
+  std::cout << "wangxixu-start_idx:" << start_idx << " end_idx:" << end_idx << std::endl;
   // Read blocks until all blocks covering the requested range are in the
   // prepared_blocks_ queue.
   while (prepared_blocks_.back()->last_row_idx() < end_idx) {

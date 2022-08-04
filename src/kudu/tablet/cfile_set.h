@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include <boost/container/flat_map.hpp>
 #include <boost/container/vector.hpp>
@@ -243,7 +244,8 @@ class CFileSet::Iterator : public ColumnwiseIterator {
         cur_idx_(0),
         prepared_count_(0),
         io_context_(io_context),
-        arena_(FLAGS_max_encoded_key_size_bytes) {}
+        arena_(FLAGS_max_encoded_key_size_bytes) {
+        }
 
   // Fill in col_iters_ for each of the requested columns.
   Status CreateColumnIterators(const ScanSpec* spec);

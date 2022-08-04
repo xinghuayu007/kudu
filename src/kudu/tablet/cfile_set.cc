@@ -419,8 +419,7 @@ Status CFileSet::Iterator::Init(ScanSpec *spec) {
 
   lower_bound_idx_ = 0;
   upper_bound_idx_ = row_count_;
-
-  RETURN_NOT_OK(OptimizePKPredicates(spec));
+  // RETURN_NOT_OK(OptimizePKPredicates(spec));
   if (spec != nullptr && spec->CanShortCircuit()) {
     lower_bound_idx_ = row_count_;
     spec->RemovePredicates();
@@ -553,11 +552,11 @@ void CFileSet::Iterator::TryEnableSkipScan(const ScanSpec& spec) {
   }
 
   // Do not enable skip scan if primary key push down has already occurred.
-  // if (lower_bound_idx_ != 0 || upper_bound_idx_ != row_count_) {
-  //   std::cout << "wangixu-lower_bound_idx_:" << lower_bound_idx_ << " upper_bound_idx_:" << upper_bound_idx_ << std::endl;
-  //   use_skip_scan_ = false;
-  //   return;
-  // }
+  if (lower_bound_idx_ != 0 || upper_bound_idx_ != row_count_) {
+    std::cout << "wangixu-lower_bound_idx_:" << lower_bound_idx_ << " upper_bound_idx_:" << upper_bound_idx_ << std::endl;
+    use_skip_scan_ = false;
+    return;
+  }
 
   bool non_prefix_key_column_pred_exists = false;
 
@@ -571,7 +570,6 @@ void CFileSet::Iterator::TryEnableSkipScan(const ScanSpec& spec) {
   for (const auto& col_and_pred : spec.predicates()) {
     const string& col_name = col_and_pred.first;
     const ColumnPredicate& pred = col_and_pred.second;
-
     // Get the column id from the predicate
     StringPiece sp(reinterpret_cast<const char*>(col_name.data()), col_name.size());
     int col_id = schema->find_column(sp);
@@ -638,7 +636,6 @@ Status CFileSet::Iterator::SeekToNextPrefixKey(size_t num_prefix_cols, bool cach
       *(base_data_->tablet_schema().get()),
       num_prefix_cols, &arena_, &enc_key_tmp));
   enc_key.reset(enc_key_tmp);
-  std::cout << "wangxixu-incremten-enc_key:" << enc_key_tmp->Stringify(*base_data_->tablet_schema().get()) << std::endl;
   if (cache_seeked_value) {
     // Set the predicate column to the predicate value in case we can find a
     // predicate match in one search. As a side effect, BuildKeyWithPredicateVal()
@@ -665,7 +662,6 @@ Status CFileSet::Iterator::SeekToRowWithCurPrefixMatchingPred(
   KuduPartialRow partial_row(base_data_->tablet_schema().get());
   gscoped_ptr<EncodedKey> key_with_pred_value;
   RETURN_NOT_OK(BuildKeyWithPredicateVal(enc_key, &partial_row, &key_with_pred_value));
-  // std::cout << "wangxixu-key_with_pred_value:" << key_with_pred_value->Stringify(*base_data_->tablet_schema().get()) << std::endl;
   return key_iter_->SeekAtOrAfter(*key_with_pred_value,
       /* cache_seeked_value= */ true,
       /* exact_match= */ nullptr);
@@ -679,19 +675,16 @@ Status CFileSet::Iterator::BuildKeyWithPredicateVal(
     gscoped_ptr<EncodedKey> *enc_key) {
 
   int col_id = 0;
-  std::cout << "wangxixu-skip_scan_predicate_column_id_:" << skip_scan_predicate_column_id_ << std::endl;
   // Build a new partial row with the current prefix key value and the
   // predicate value.
   for (auto const& value : cur_enc_key->raw_keys()) {
     if (col_id < skip_scan_predicate_column_id_) {
       const uint8_t *data = reinterpret_cast<const uint8_t *>(value);
-      std::cout << "wangxixu-data:" << int(*data) << std::endl;
       RETURN_NOT_OK(p_row->Set(col_id, data));
     } else {
       // Set the predicate value.
       const uint8_t *suffix_col_value =
           reinterpret_cast<const uint8_t *>(skip_scan_predicate_value_);
-      std::cout << "wangxixu-data2:" << std::endl;
       RETURN_NOT_OK(p_row->Set(skip_scan_predicate_column_id_, suffix_col_value));
       break;
     }
@@ -705,14 +698,11 @@ Status CFileSet::Iterator::BuildKeyWithPredicateVal(
        i < base_data_->tablet_schema()->num_key_columns(); i++) {
     const ColumnSchema& col = cont_row.schema()->column(i);
     col.type_info()->CopyMinValue(cont_row.mutable_cell_ptr(i));
-    std::cout << "wangxixu-after-key" << std::endl;
   }
   // Build the new encoded key.
   ConstContiguousRow const_row(cont_row);
   gscoped_ptr<EncodedKey> new_enc_key(EncodedKey::FromContiguousRow(const_row, &arena_));
-  std::cout << "wangxixu-new_enc_key:" << new_enc_key->Stringify(*base_data_->tablet_schema().get()) << std::endl;
   *enc_key = new_enc_key.Pass();
-  std::cout << "wangxixu-enc_key2:" << (*enc_key)->Stringify(*base_data_->tablet_schema().get()) << std::endl;
   return Status::OK();
 }
 
@@ -767,7 +757,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
 
   skip_scan_upper_bound_idx_ = upper_bound_idx_;
   size_t skip_scan_lower_bound_idx = cur_idx_;
-  std::cout << "wangxixu-skip_scan_lower_bound_idx:" << skip_scan_lower_bound_idx << " skip_scan_upper_bound_idx_:" << skip_scan_upper_bound_idx_ << std::endl;
   // Whether we found our lower bound key.
   bool lower_bound_key_found = false;
 
@@ -779,7 +768,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     DCHECK_LT(cur_idx_, skip_scan_upper_bound_idx_);
 
     // Step 1. search for the next distinct prefix.
-
     Status s;
     // We only want to seek to the first entry if this is the first time we
     // are entering this loop on the first call to this method.
@@ -790,7 +778,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
                                                  // our previous call to
                                                  // SeekToRowWithCurPrefixMatchingPred()
                                                  // didn't "roll" past the previous prefix.
-      std::cout << "wangxixu-skip_scan_searched_cur_prefix_:" << skip_scan_searched_cur_prefix_ << std::endl;
       s = SeekToNextPrefixKey(skip_scan_predicate_column_id_, /* cache_seeked_value=*/ true);
 
       skip_scan_num_seeks_++;
@@ -816,7 +803,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     // Clear the buffer that stores the encoded key.
     gscoped_ptr<EncodedKey> next_prefix_key;
     RETURN_NOT_OK(DecodeCurrentKey(&next_prefix_key));
-    std::cout << "wangxixu-next_prefix_key:" << next_prefix_key->Stringify(*base_data_->tablet_schema().get()) << std::endl;
     // Attempt to seek to the row with predicate match.
     s = SeekToRowWithCurPrefixMatchingPred(next_prefix_key);
     if (s.IsNotFound()) {
@@ -828,16 +814,13 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     gscoped_ptr<EncodedKey> lower_bound_key;
     // Check if we successfully seeked to a predicate key match.
     RETURN_NOT_OK(DecodeCurrentKey(&lower_bound_key));
-    std::cout << "wangxixu-lower_bound_key:" << lower_bound_key->Stringify(*base_data_->tablet_schema().get()) << std::endl;
     // Keep track of the lower bound on a matching key.
     skip_scan_lower_bound_idx = key_iter_->GetCurrentOrdinal();
-    std::cout << "wangxixu-skip_scan_lower_bound_idx:" << skip_scan_lower_bound_idx << std::endl;
     // Does this lower bound key match ?
     // This check is only for the predicate column value match.
     // Even if the prefix key does not match, skip scan flow will work
     // as expected.
     lower_bound_key_found = CheckPredicateMatch(lower_bound_key);
-    std::cout << "wangxixu-lower_bound_key_found:" << lower_bound_key_found << std::endl;
     // We weren't able to find a predicate match for our lower bound key, so loop and search again.
     if (!lower_bound_key_found) {
       // If the prefix key rolled between our initial lower bound next prefix
@@ -898,7 +881,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     RETURN_NOT_OK(s);
 
     skip_scan_upper_bound_idx_ = key_iter_->GetCurrentOrdinal();
-    std::cout << "wangxixu-skip_scan_upper_bound_idx_:" << skip_scan_upper_bound_idx_ << std::endl;
     // Check to see whether we have effectively seeked backwards. If so, we
     // need to keep looking until our upper bound is past the last row that we
     // previously scanned.
@@ -912,7 +894,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
   // Seek to the next lower bound match.
   // Never seek backward. For details, refer to the comment about tracking two
   // pointers with skip-scan (near the method beginning).
-  std::cout << "wangxixu-cur_idx:" << cur_idx_ << std::endl;
   cur_idx_ = std::max<int64_t>(cur_idx_, skip_scan_lower_bound_idx);
   if (!lower_bound_key_found) {
     // TODO(anupama): We scan a single row (guaranteed not to match) for now, because
@@ -924,16 +905,15 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
   } else {
     // Always read at least one row.
     *remaining = std::max<int64_t>(skip_scan_upper_bound_idx_ - cur_idx_, 1);
-    std::cout << "wangxixu-remaing:" << *remaining << std::endl;
   }
   return Status::OK();
 }
 
 Status CFileSet::Iterator::PrepareBatch(size_t *nrows) {
   DCHECK_EQ(prepared_count_, 0) << "Already prepared";
-
+  std::cout << "wangxixu-preapre-batch" << std::endl;
   size_t remaining = upper_bound_idx_ - cur_idx_;
-
+  std::cout << "wangxixu-upper_bound_idx_:" << upper_bound_idx_ << " cur_idx_:" << cur_idx_ << " remaining:" << remaining << " nrow:" << *nrows << std::endl;
   if (use_skip_scan_) {
     Status s = SkipToNextScan(&remaining);
     if (!s.ok()) {
@@ -947,7 +927,7 @@ Status CFileSet::Iterator::PrepareBatch(size_t *nrows) {
   }
 
   prepared_count_ = *nrows;
-
+  std::cout << "wangxixu-after-index_skip-prepared_count_:" << prepared_count_ << std::endl;
   // Lazily prepare the first column when it is materialized.
   return Status::OK();
 }
@@ -992,10 +972,10 @@ Status CFileSet::Iterator::InitializeSelectionVector(SelectionVector *sel_vec) {
 Status CFileSet::Iterator::MaterializeColumn(ColumnMaterializationContext *ctx) {
   CHECK_EQ(prepared_count_, ctx->block()->nrows());
   DCHECK_LT(ctx->col_idx(), col_iters_.size());
-
+  std::cout << "wangxixu-PrepareColumn" << std::endl;
   RETURN_NOT_OK(PrepareColumn(ctx));
   ColumnIterator* iter = col_iters_[ctx->col_idx()].get();
-
+  std::cout << "wangxixu-scan:" << std::endl;
   RETURN_NOT_OK(iter->Scan(ctx));
 
   return Status::OK();

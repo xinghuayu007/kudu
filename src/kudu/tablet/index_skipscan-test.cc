@@ -192,7 +192,6 @@ class IndexSkipScanTest : public KuduTabletTest,
         break;
 
       case kTwoPK:
-        std::cout << "wangxixu-create-2-pk" << std::endl;
         CHECK_OK(builder.AddKeyColumn("P1", INT32));
         CHECK_OK(builder.AddKeyColumn("P2", INT16));
         break;
@@ -389,8 +388,7 @@ class IndexSkipScanTest : public KuduTabletTest,
     shared_ptr<CFileSet> fileset;
     ASSERT_OK(CFileSet::Open(rowset_meta_, MemTracker::GetRootTracker(),
                              MemTracker::GetRootTracker(), nullptr, &fileset));
-    unique_ptr<CFileSet::Iterator> cfile_iter(fileset->NewIterator(&schema_,
-                                                                   /*io_context=*/nullptr));
+    unique_ptr<CFileSet::Iterator> cfile_iter(fileset->NewIterator(&schema_, nullptr));
     // The unique_ptr is move()d and we want to be able to assert on some
     // internals later.
     CFileSet::Iterator* raw_cfile_iter = cfile_iter.get();
@@ -438,7 +436,6 @@ TEST_P(IndexSkipScanTest, IndexSkipScanCorrectnessTest) {
     }
 
     case kTwoPK: {
-      std::cout << "wangxixu-begin-test:" << schema_type << std::endl;
       // Test predicate on the first PK column.
       ScanSpec spec;
       int32_t value_p1 = 2;
@@ -479,7 +476,6 @@ TEST_P(IndexSkipScanTest, IndexSkipScanCorrectnessTest) {
       Slice value_p3("2_p3");
       auto pred_p3 = ColumnPredicate::Equality(schema_.column(2), &value_p3);
       spec.AddPredicate(pred_p3);
-      std::cout << "wangxixu-test-predicate:" << pred_p3.ToString() << std::endl;
       vector<string> results;
       NO_FATALS(ScanTablet(&spec, &results, "Exact match on P3", true));
       EXPECT_EQ(20, results.size());
