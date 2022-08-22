@@ -1231,7 +1231,6 @@ bool MaterializingIterator::HasNext() const {
 }
 
 Status MaterializingIterator::NextBlock(RowBlock* dst) {
-  std::cout << "wangxixu-begin-to-read-data" << std::endl;
   size_t n = dst->row_capacity();
   if (dst->arena()) {
     dst->arena()->Reset();
@@ -1298,7 +1297,6 @@ Status MaterializingIterator::MaterializeBlock(RowBlock *dst) {
     // still helps measure whether the predicate is effective in filtering out rows.
     auto num_rows_before = disableable_predicate_enabled ?
                            dst->selection_vector()->CountSelected() : 0;
-    std::cout << "wangxixu-MaterializeColumn" << std::endl;
     RETURN_NOT_OK(iter_->MaterializeColumn(&ctx));
     if (ctx.DecoderEvalNotSupported() && !disableable_predicate_disabled) {
       predicate.Evaluate(dst_col, dst->selection_vector());

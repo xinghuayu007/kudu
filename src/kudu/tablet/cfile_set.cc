@@ -911,9 +911,7 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
 
 Status CFileSet::Iterator::PrepareBatch(size_t *nrows) {
   DCHECK_EQ(prepared_count_, 0) << "Already prepared";
-  std::cout << "wangxixu-preapre-batch" << std::endl;
   size_t remaining = upper_bound_idx_ - cur_idx_;
-  std::cout << "wangxixu-upper_bound_idx_:" << upper_bound_idx_ << " cur_idx_:" << cur_idx_ << " remaining:" << remaining << " nrow:" << *nrows << std::endl;
   if (use_skip_scan_) {
     Status s = SkipToNextScan(&remaining);
     if (!s.ok()) {
@@ -925,9 +923,7 @@ Status CFileSet::Iterator::PrepareBatch(size_t *nrows) {
   if (*nrows > remaining) {
     *nrows = remaining;
   }
-
   prepared_count_ = *nrows;
-  std::cout << "wangxixu-after-index_skip-prepared_count_:" << prepared_count_ << std::endl;
   // Lazily prepare the first column when it is materialized.
   return Status::OK();
 }
@@ -935,16 +931,16 @@ Status CFileSet::Iterator::PrepareBatch(size_t *nrows) {
 Status CFileSet::Iterator::PrepareColumn(ColumnMaterializationContext *ctx) {
   ColumnIterator* col_iter = col_iters_[ctx->col_idx()].get();
   size_t n = prepared_count_;
-
   if (!col_iter->seeked() || col_iter->GetCurrentOrdinal() != cur_idx_) {
     // Either this column has not yet been accessed, or it was accessed
     // but then skipped in a prior block (e.g because predicates on other
     // columns completely eliminated the block).
     //
     // Either way, we need to seek it to the correct offset.
+    std::cout << "wangxixu-seektoordinal-column_id:" << ctx->col_idx() << std::endl;
     RETURN_NOT_OK(col_iter->SeekToOrdinal(cur_idx_));
   }
-
+  std::cout << "wangxixu-prepare-column_id:" << ctx->col_idx() << std::endl;
   Status s = col_iter->PrepareBatch(&n);
   if (!s.ok()) {
     LOG(WARNING) << "Unable to prepare column " << ctx->col_idx() << ": " << s.ToString();
@@ -972,10 +968,8 @@ Status CFileSet::Iterator::InitializeSelectionVector(SelectionVector *sel_vec) {
 Status CFileSet::Iterator::MaterializeColumn(ColumnMaterializationContext *ctx) {
   CHECK_EQ(prepared_count_, ctx->block()->nrows());
   DCHECK_LT(ctx->col_idx(), col_iters_.size());
-  std::cout << "wangxixu-PrepareColumn" << std::endl;
   RETURN_NOT_OK(PrepareColumn(ctx));
   ColumnIterator* iter = col_iters_[ctx->col_idx()].get();
-  std::cout << "wangxixu-scan:" << std::endl;
   RETURN_NOT_OK(iter->Scan(ctx));
 
   return Status::OK();

@@ -708,7 +708,6 @@ Status CFileIterator::SeekToOrdinal(rowid_t ord_idx) {
       prepared_block_pool_.Destroy(pb);
     }
     prepared_blocks_.clear();
-
     prepared_blocks_.push_back(b);
   } else {
     // Otherwise, prepare a new block to scan.
@@ -748,7 +747,6 @@ Status CFileIterator::SeekToOrdinal(rowid_t ord_idx) {
   last_prepare_idx_ = ord_idx;
   last_prepare_count_ = 0;
   seeked_ = posidx_iter_.get();
-
   CHECK_EQ(ord_idx, GetCurrentOrdinal());
   return Status::OK();
 }
@@ -1044,10 +1042,11 @@ Status CFileIterator::PrepareBatch(size_t *n) {
 
   rowid_t start_idx = last_prepare_idx_;
   rowid_t end_idx = start_idx + *n;
-  std::cout << "wangxixu-start_idx:" << start_idx << " end_idx:" << end_idx << std::endl;
   // Read blocks until all blocks covering the requested range are in the
   // prepared_blocks_ queue.
+  std::cout << "wangxixu-preapre-batch-start_idx:" << start_idx << " end_idx:" << end_idx << std::endl;
   while (prepared_blocks_.back()->last_row_idx() < end_idx) {
+    std::cout << "wangxixu-begin-may-core" << std::endl;
     Status s = seeked_->Next();
     if (PREDICT_FALSE(s.IsNotFound())) {
       VLOG(1) << "Reached EOF";
@@ -1075,13 +1074,13 @@ Status CFileIterator::PrepareBatch(size_t *n) {
   last_prepare_count_ = *n;
   prepared_ = true;
 
-  if (PREDICT_FALSE(VLOG_IS_ON(1))) {
-    VLOG(1) << "Prepared for " << (*n) << " rows"
-            << " (" << start_idx << "-" << (start_idx + *n - 1) << ")";
+  if (1 == 1) {
+    std::cout << "Prepared for " << (*n) << " rows"
+            << " (" << start_idx << "-" << (start_idx + *n - 1) << ")" << std::endl;
     for (PreparedBlock *b : prepared_blocks_) {
-      VLOG(1) << "  " << b->ToString();
+      std::cout << "  " << b->ToString() << std::endl;
     }
-    VLOG(1) << "-------------";
+    std::cout << "-------------" << std::endl;
   }
 
   return Status::OK();

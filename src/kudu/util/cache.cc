@@ -650,9 +650,7 @@ class ShardedCache : public Cache {
  protected:
   void Release(Handle* handle) override {
     RLHandle* h = reinterpret_cast<RLHandle*>(handle);
-    std::cout << "wangxixu-begin-core-size:" << (shards_.size()) << std::endl;
     shards_[Shard(h->hash)]->Release(handle);
-    std::cout << "wangxixu-end-core10" << std::endl;
   }
 
   void Free(PendingHandle* h) override {
