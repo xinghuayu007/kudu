@@ -304,7 +304,6 @@ Status IndexTreeIterator::LoadBlock(const BlockPointer &block,
   RETURN_NOT_OK(reader_->ReadBlock(io_context_, block,
                                    CFileReader::CACHE_BLOCK, &seeked->data));
   seeked->block_ptr = block;
-  std::cout << "wangxixu-load-new-block" << std::endl;
   // Parse the new block.
   RETURN_NOT_OK_PREPEND(seeked->reader.Parse(seeked->data->data()),
                         Substitute("failed to parse index block in block $0 at $1",

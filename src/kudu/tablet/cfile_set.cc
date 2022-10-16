@@ -553,7 +553,6 @@ void CFileSet::Iterator::TryEnableSkipScan(const ScanSpec& spec) {
 
   // Do not enable skip scan if primary key push down has already occurred.
   if (lower_bound_idx_ != 0 || upper_bound_idx_ != row_count_) {
-    std::cout << "wangixu-lower_bound_idx_:" << lower_bound_idx_ << " upper_bound_idx_:" << upper_bound_idx_ << std::endl;
     use_skip_scan_ = false;
     return;
   }
@@ -565,7 +564,7 @@ void CFileSet::Iterator::TryEnableSkipScan(const ScanSpec& spec) {
   int min_non_prefix_col_id = num_key_cols;
 
   // Tracks the equality predicate value for "min_non_prefix_col_id"
-  const void* min_non_prefix_pred_value;
+  const void* min_non_prefix_pred_value = nullptr;
 
   for (const auto& col_and_pred : spec.predicates()) {
     const string& col_name = col_and_pred.first;
@@ -641,8 +640,12 @@ Status CFileSet::Iterator::SeekToNextPrefixKey(size_t num_prefix_cols, bool cach
     // predicate match in one search. As a side effect, BuildKeyWithPredicateVal()
     // sets minimum values on the columns after the predicate value, which is
     // required for correctness here.
+    gscoped_ptr<EncodedKey> new_enc_key;
     KuduPartialRow partial_row(base_data_->tablet_schema().get());
-    RETURN_NOT_OK(BuildKeyWithPredicateVal(enc_key, &partial_row, &enc_key));
+    RETURN_NOT_OK(BuildKeyWithPredicateVal(enc_key, &partial_row, &new_enc_key));
+    return key_iter_->SeekAtOrAfter(*new_enc_key,
+      /* cache_seeked_value= */ cache_seeked_value,
+      /* exact_match= */ nullptr);
   }
   return key_iter_->SeekAtOrAfter(*enc_key,
       /* cache_seeked_value= */ cache_seeked_value,
@@ -725,35 +728,10 @@ bool CFileSet::Iterator::KeyColumnsMatch(const gscoped_ptr<EncodedKey>& key1,
 }
 
 Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
-  // Keep scanning if we're still in the range that needs scanning from our
-  // previous seek. static_cast required because cur_idx_ is unsigned and the
-  // upper bound index can be negative.
   if (static_cast<int64_t>(cur_idx_) < skip_scan_upper_bound_idx_) {
     *remaining = std::max<int64_t>(skip_scan_upper_bound_idx_ - cur_idx_, 1);
     return Status::OK();
   }
-
-  // This is a three seek approach for index skip scan implementation:
-  // 1. Search within the ad-hoc index for the next distinct prefix
-  //    (set of keys prior to the predicate column).
-  //    Searching is done using validx_iter_.
-  // 2. Read that distinct prefix from the ad-hoc index, append the predicate value
-  //    and minimum possible value for all other columns, and seek to that.
-  //    If this matches, this is the lower bound of our desired scan.
-  // 3. If we found our desired lower bound, find an upper bound for the scan
-  //    by searching for the next row key matching one value higher than the
-  //    highest value that will match our predicate.
-  //
-  // We track two pointers with skip-scan:
-  //   - the primary key (PK) value index (ad-hoc index) search pointer,
-  //     which gives us a forward index of value to position
-  //   - the scan pointer, which is cur_idx_, representing an offset one more
-  //     than the last row that we actually scanned (in the previous batch)
-  //
-  // Currently lookup by position (ordinal) is not supported for ad-hoc index (value based index),
-  // due to this, in some cases PK lookups may land us at an offset that we had already scanned.
-  // In this case, we continue with the PK lookups until the upper bound key offset
-  // (skip_scan_upper_bound_idx_) <= cur_idx_.
 
   skip_scan_upper_bound_idx_ = upper_bound_idx_;
   size_t skip_scan_lower_bound_idx = cur_idx_;
@@ -799,7 +777,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     RETURN_NOT_OK(s);
 
     // Step 2. seek to the lower bound of our desired scan.
-
     // Clear the buffer that stores the encoded key.
     gscoped_ptr<EncodedKey> next_prefix_key;
     RETURN_NOT_OK(DecodeCurrentKey(&next_prefix_key));
@@ -816,10 +793,6 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
     RETURN_NOT_OK(DecodeCurrentKey(&lower_bound_key));
     // Keep track of the lower bound on a matching key.
     skip_scan_lower_bound_idx = key_iter_->GetCurrentOrdinal();
-    // Does this lower bound key match ?
-    // This check is only for the predicate column value match.
-    // Even if the prefix key does not match, skip scan flow will work
-    // as expected.
     lower_bound_key_found = CheckPredicateMatch(lower_bound_key);
     // We weren't able to find a predicate match for our lower bound key, so loop and search again.
     if (!lower_bound_key_found) {
@@ -860,27 +833,18 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
       }
       continue;
     }
-
-    // Step 3. seek to the upper bound of our desired scan.
-    // TODO(anupama): to support in-range predicates, seek right after the
-    // last occurrence of the row containing the prefix key and predicate column
-    // containing the upper bound of the predicate values.
-
-    // Note: To handle a similar situation (as illustrated with Tables above) when finding the
-    // upper bound key offset, we follow a different approach. We simply do not cache
-    // the seeked value for the upper bound key, hence cache_seeked_value = false below.
-    // However, in this case the 'cache_seeked_value' parameter has additional
-    // semantics: not only are we not caching the seeked value, but we're
-    // searching for a different value than if `cache_seeked_value` were true.
+  
     s = SeekToNextPrefixKey(skip_scan_predicate_column_id_, /* cache_seeked_value=*/ false);
     if (s.IsNotFound()) {
       // We hit the end of the file. Simply scan to the end.
       skip_scan_upper_bound_idx_ = upper_bound_idx_;
       break;
     }
+  
     RETURN_NOT_OK(s);
 
     skip_scan_upper_bound_idx_ = key_iter_->GetCurrentOrdinal();
+
     // Check to see whether we have effectively seeked backwards. If so, we
     // need to keep looking until our upper bound is past the last row that we
     // previously scanned.
@@ -937,10 +901,8 @@ Status CFileSet::Iterator::PrepareColumn(ColumnMaterializationContext *ctx) {
     // columns completely eliminated the block).
     //
     // Either way, we need to seek it to the correct offset.
-    std::cout << "wangxixu-seektoordinal-column_id:" << ctx->col_idx() << std::endl;
     RETURN_NOT_OK(col_iter->SeekToOrdinal(cur_idx_));
   }
-  std::cout << "wangxixu-prepare-column_id:" << ctx->col_idx() << std::endl;
   Status s = col_iter->PrepareBatch(&n);
   if (!s.ok()) {
     LOG(WARNING) << "Unable to prepare column " << ctx->col_idx() << ": " << s.ToString();

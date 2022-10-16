@@ -1044,9 +1044,7 @@ Status CFileIterator::PrepareBatch(size_t *n) {
   rowid_t end_idx = start_idx + *n;
   // Read blocks until all blocks covering the requested range are in the
   // prepared_blocks_ queue.
-  std::cout << "wangxixu-preapre-batch-start_idx:" << start_idx << " end_idx:" << end_idx << std::endl;
   while (prepared_blocks_.back()->last_row_idx() < end_idx) {
-    std::cout << "wangxixu-begin-may-core" << std::endl;
     Status s = seeked_->Next();
     if (PREDICT_FALSE(s.IsNotFound())) {
       VLOG(1) << "Reached EOF";
