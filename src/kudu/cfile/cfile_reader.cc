@@ -732,6 +732,8 @@ Status CFileIterator::SeekToOrdinal(rowid_t ord_idx) {
     if (PREDICT_FALSE(ord_idx > b->last_row_idx())) {
       return Status::NotFound("trying to seek past highest ordinal in file");
     }
+    LOG(INFO) << "wangxixu-read-data-block-id: " << reader_->block_id()
+              << " last-row-id: " << b->last_row_idx();
     prepared_blocks_.push_back(b.release());
   }
 
@@ -1030,7 +1032,7 @@ Status CFileIterator::QueueCurrentDataBlock(const IndexTreeIterator &idx_iter) {
 bool CFileIterator::HasNext() const {
   CHECK(seeked_) << "not seeked";
   CHECK(!prepared_) << "Cannot call HasNext() mid-batch";
-
+  LOG(INFO) << "wangxixu-hash-next-block-id:" << reader_->block_id();
   return !prepared_blocks_.empty() || seeked_->HasNext();
 }
 
@@ -1042,6 +1044,8 @@ Status CFileIterator::PrepareBatch(size_t *n) {
 
   rowid_t start_idx = last_prepare_idx_;
   rowid_t end_idx = start_idx + *n;
+  LOG(INFO) << "wangxixu-start_idx:" << start_idx << " end_idx: "
+            << end_idx << " block-id:" << reader_->block_id();
   // Read blocks until all blocks covering the requested range are in the
   // prepared_blocks_ queue.
   while (prepared_blocks_.back()->last_row_idx() < end_idx) {
@@ -1073,8 +1077,9 @@ Status CFileIterator::PrepareBatch(size_t *n) {
   prepared_ = true;
 
   if (1 == 1) {
-    std::cout << "Prepared for " << (*n) << " rows"
-            << " (" << start_idx << "-" << (start_idx + *n - 1) << ")" << std::endl;
+    LOG(INFO) << "Prepared for " << (*n) << " rows"
+            << " (" << start_idx << "-" << (start_idx + *n - 1) << ")"
+            << " block-id: " << reader_->block_id();
     for (PreparedBlock *b : prepared_blocks_) {
       std::cout << "  " << b->ToString() << std::endl;
     }

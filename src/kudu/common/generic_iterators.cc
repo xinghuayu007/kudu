@@ -1227,18 +1227,22 @@ Status MaterializingIterator::Init(ScanSpec *spec) {
 }
 
 bool MaterializingIterator::HasNext() const {
+  LOG(INFO) << "wangxixu-MaterializingIterator-has-next";
   return iter_->HasNext();
 }
 
 Status MaterializingIterator::NextBlock(RowBlock* dst) {
+  LOG(INFO) << "wangxixu-MaterializingIterator-next-block";
   size_t n = dst->row_capacity();
   if (dst->arena()) {
     dst->arena()->Reset();
   }
-
+  LOG(INFO) << "wangxixu-preparebatch";
   RETURN_NOT_OK(iter_->PrepareBatch(&n));
   dst->Resize(n);
+  LOG(INFO) << "wangxixu-materialize-block";
   RETURN_NOT_OK(MaterializeBlock(dst));
+  LOG(INFO) << "wangxixu-finish-batch";
   RETURN_NOT_OK(iter_->FinishBatch());
 
   return Status::OK();

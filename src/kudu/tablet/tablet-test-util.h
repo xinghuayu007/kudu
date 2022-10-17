@@ -223,6 +223,7 @@ static inline Status IterateToStringList(RowwiseIterator* iter,
   RowBlock block(&schema, 100, &memory);
   int fetched = 0;
   while (iter->HasNext() && fetched < limit) {
+    LOG(INFO) << "wangxixu-get-next-block";
     RETURN_NOT_OK(iter->NextBlock(&block));
     for (size_t i = 0; i < block.nrows() && fetched < limit; i++) {
       if (block.selection_vector()->IsRowSelected(i)) {

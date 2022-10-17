@@ -840,11 +840,10 @@ Status CFileSet::Iterator::SkipToNextScan(size_t *remaining) {
       skip_scan_upper_bound_idx_ = upper_bound_idx_;
       break;
     }
-  
+
     RETURN_NOT_OK(s);
 
     skip_scan_upper_bound_idx_ = key_iter_->GetCurrentOrdinal();
-
     // Check to see whether we have effectively seeked backwards. If so, we
     // need to keep looking until our upper bound is past the last row that we
     // previously scanned.
@@ -901,6 +900,7 @@ Status CFileSet::Iterator::PrepareColumn(ColumnMaterializationContext *ctx) {
     // columns completely eliminated the block).
     //
     // Either way, we need to seek it to the correct offset.
+    LOG(INFO) << "wangxixu-first-seek-to-ordinal";
     RETURN_NOT_OK(col_iter->SeekToOrdinal(cur_idx_));
   }
   Status s = col_iter->PrepareBatch(&n);
@@ -928,10 +928,13 @@ Status CFileSet::Iterator::InitializeSelectionVector(SelectionVector *sel_vec) {
 }
 
 Status CFileSet::Iterator::MaterializeColumn(ColumnMaterializationContext *ctx) {
+  LOG(INFO) << "wangxixu-MaterializeColumn, col-id: " << ctx->col_idx();
   CHECK_EQ(prepared_count_, ctx->block()->nrows());
   DCHECK_LT(ctx->col_idx(), col_iters_.size());
+  LOG(INFO) << "wangxixu-prepare-column";
   RETURN_NOT_OK(PrepareColumn(ctx));
   ColumnIterator* iter = col_iters_[ctx->col_idx()].get();
+  LOG(INFO) << "wangxixu-scan";
   RETURN_NOT_OK(iter->Scan(ctx));
 
   return Status::OK();

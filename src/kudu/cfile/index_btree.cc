@@ -314,7 +314,7 @@ Status IndexTreeIterator::LoadBlock(const BlockPointer &block,
 
 Status IndexTreeIterator::SeekDownward(const Slice &search_key, const BlockPointer &in_block,
                                        int cur_depth) {
-
+  LOG(INFO) << "wangxixu-in-block: " << in_block.ToString();
   // Read the block.
   RETURN_NOT_OK(LoadBlock(in_block, cur_depth));
   IndexBlockIterator *iter = seeked_iter(cur_depth);

@@ -81,6 +81,7 @@ void DeltaApplier::GetIteratorStats(std::vector<IteratorStats>* stats) const {
 }
 
 bool DeltaApplier::HasNext() const {
+  LOG(INFO) << "wangxixu-DeltaApplier-has-next";
   return base_iter_->HasNext();
 }
 
