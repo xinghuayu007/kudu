@@ -71,6 +71,12 @@ Status EncodedKey::DecodeEncodedString(const Schema& schema,
 Status EncodedKey::IncrementEncodedKey(const Schema& tablet_schema,
                                        EncodedKey** key,
                                        Arena* arena) {
+  return IncrementEncodedKeyColumns(tablet_schema, tablet_schema.num_key_columns(), arena, key);
+}
+
+Status EncodedKey::IncrementEncodedKeyColumns(const Schema& tablet_schema,
+                                              int32_t num_columns, Arena* arena,
+                                              EncodedKey** key) {
   // Copy the row itself to the Arena.
   uint8_t* new_row_key = static_cast<uint8_t*>(
       arena->AllocateBytes(tablet_schema.key_byte_size()));
@@ -87,9 +93,9 @@ Status EncodedKey::IncrementEncodedKey(const Schema& tablet_schema,
            size);
   }
 
-  // Increment the new key
+  // Increment the first "num_columns" columns of the new key.
   ContiguousRow new_row(&tablet_schema, new_row_key);
-  if (!key_util::IncrementPrimaryKey(&new_row, arena)) {
+  if (!key_util::IncrementPrimaryKey(&new_row, num_columns, arena)) {
     return Status::IllegalState("No lexicographically greater key exists");
   }
 

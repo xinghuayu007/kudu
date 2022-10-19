@@ -304,19 +304,17 @@ Status IndexTreeIterator::LoadBlock(const BlockPointer &block,
   RETURN_NOT_OK(reader_->ReadBlock(io_context_, block,
                                    CFileReader::CACHE_BLOCK, &seeked->data));
   seeked->block_ptr = block;
-
   // Parse the new block.
   RETURN_NOT_OK_PREPEND(seeked->reader.Parse(seeked->data->data()),
                         Substitute("failed to parse index block in block $0 at $1",
                                    reader_->block_id().ToString(),
                                    block.ToString()));
-
   return Status::OK();
 }
 
 Status IndexTreeIterator::SeekDownward(const Slice &search_key, const BlockPointer &in_block,
                                        int cur_depth) {
-
+  LOG(INFO) << "wangxixu-in-block: " << in_block.ToString();
   // Read the block.
   RETURN_NOT_OK(LoadBlock(in_block, cur_depth));
   IndexBlockIterator *iter = seeked_iter(cur_depth);

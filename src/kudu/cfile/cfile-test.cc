@@ -662,6 +662,7 @@ void TestCFile::TestReadWriteStrings(EncodingType encoding,
 
   EncodedKey* encoded_key = nullptr;
   bool exact;
+  Arena area(8192);
 
   // Seek in between each key.
   // (seek to "hello 0000.5" through "hello 9999.5")
@@ -671,8 +672,10 @@ void TestCFile::TestReadWriteStrings(EncodingType encoding,
     buf = formatter(i - 1);
     buf.append(".5");
     s = Slice(buf);
-    EncodeStringKey(schema, s, &mem.arena, &encoded_key);
-    ASSERT_OK(iter->SeekAtOrAfter(*encoded_key, &exact));
+    EncodeStringKey(schema, s, &area, &encoded_key);
+    ASSERT_OK(iter->SeekAtOrAfter(*encoded_key,
+        /* cache_seeked_value= */ false,
+        /* exact_match= */ &exact));
     ASSERT_FALSE(exact);
     ASSERT_EQ(i, iter->GetCurrentOrdinal());
     CopyOne<STRING>(iter.get(), &s, &mem);
@@ -685,8 +688,10 @@ void TestCFile::TestReadWriteStrings(EncodingType encoding,
     mem.Reset();
     buf = formatter(i);
     s = Slice(buf);
-    EncodeStringKey(schema, s, &mem.arena, &encoded_key);
-    ASSERT_OK(iter->SeekAtOrAfter(*encoded_key, &exact));
+    EncodeStringKey(schema, s, &area, &encoded_key);
+    ASSERT_OK(iter->SeekAtOrAfter(*encoded_key,
+        /* cache_seeked_value= */ false,
+        /* exact_match= */ &exact));
     ASSERT_TRUE(exact);
     ASSERT_EQ(i, iter->GetCurrentOrdinal());
     Slice read_back;
@@ -698,16 +703,19 @@ void TestCFile::TestReadWriteStrings(EncodingType encoding,
   // (seek to "hello 9999.x")
   buf = formatter(9999) + ".x";
   s = Slice(buf);
-  EncodeStringKey(schema, s, &mem.arena, &encoded_key);
-  EXPECT_TRUE(iter->SeekAtOrAfter(*encoded_key, &exact).IsNotFound());
-
+  EncodeStringKey(schema, s, &area, &encoded_key);
+  EXPECT_TRUE(iter->SeekAtOrAfter(*encoded_key,
+      /* cache_seeked_value= */ false,
+      /* exact_match= */ &exact).IsNotFound());
   // before first entry
   // (seek to "hello 000", which falls before "hello 0000")
   buf = formatter(0);
   buf.resize(buf.size() - 1);
   s = Slice(buf);
-  EncodeStringKey(schema, s, &mem.arena, &encoded_key);
-  ASSERT_OK(iter->SeekAtOrAfter(*encoded_key, &exact));
+  EncodeStringKey(schema, s, &area, &encoded_key);
+  ASSERT_OK(iter->SeekAtOrAfter(*encoded_key,
+      /* cache_seeked_value= */ false,
+      /* exact_match= */ &exact));
   EXPECT_FALSE(exact);
   EXPECT_EQ(0, iter->GetCurrentOrdinal());
   CopyOne<STRING>(iter.get(), &s, &mem);

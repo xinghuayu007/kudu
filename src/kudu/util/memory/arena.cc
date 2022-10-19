@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <iostream>
 
 using std::min;
 using std::unique_ptr;
@@ -126,7 +127,6 @@ typename ArenaBase<THREADSAFE>::Component* ArenaBase<THREADSAFE>::NewComponent(
   Buffer* buffer = buffer_allocator_->BestEffortAllocate(requested_size,
                                                          minimum_size);
   if (buffer == nullptr) return nullptr;
-
   CHECK_EQ(reinterpret_cast<uintptr_t>(buffer->data()) & (16 - 1), 0)
     << "Components should be 16-byte aligned: " << buffer->data();
 

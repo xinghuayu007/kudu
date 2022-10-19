@@ -19,6 +19,7 @@
 #define KUDU_CFILE_BLOCK_HANDLE_H
 
 #include <memory>
+#include <iostream>
 
 #include <boost/variant/get.hpp>
 #include <boost/variant/variant.hpp>

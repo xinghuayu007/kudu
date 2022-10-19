@@ -1227,18 +1227,22 @@ Status MaterializingIterator::Init(ScanSpec *spec) {
 }
 
 bool MaterializingIterator::HasNext() const {
+  LOG(INFO) << "wangxixu-MaterializingIterator-has-next";
   return iter_->HasNext();
 }
 
 Status MaterializingIterator::NextBlock(RowBlock* dst) {
+  LOG(INFO) << "wangxixu-MaterializingIterator-next-block";
   size_t n = dst->row_capacity();
   if (dst->arena()) {
     dst->arena()->Reset();
   }
-
+  LOG(INFO) << "wangxixu-preparebatch";
   RETURN_NOT_OK(iter_->PrepareBatch(&n));
   dst->Resize(n);
+  LOG(INFO) << "wangxixu-materialize-block";
   RETURN_NOT_OK(MaterializeBlock(dst));
+  LOG(INFO) << "wangxixu-finish-batch";
   RETURN_NOT_OK(iter_->FinishBatch());
 
   return Status::OK();
@@ -1297,7 +1301,6 @@ Status MaterializingIterator::MaterializeBlock(RowBlock *dst) {
     // still helps measure whether the predicate is effective in filtering out rows.
     auto num_rows_before = disableable_predicate_enabled ?
                            dst->selection_vector()->CountSelected() : 0;
-
     RETURN_NOT_OK(iter_->MaterializeColumn(&ctx));
     if (ctx.DecoderEvalNotSupported() && !disableable_predicate_disabled) {
       predicate.Evaluate(dst_col, dst->selection_vector());
